@@ -8,6 +8,7 @@ import {
   BoardSheet,
   DispatchColumn,
   GameOverOverlay,
+  RiderInspector,
   ShopSheet,
   StartOverlay,
   TopHud,
@@ -30,6 +31,7 @@ export default function GameApp() {
   const [shopOpen, setShopOpen] = useState(false);
   const [boardOpen, setBoardOpen] = useState(false);
   const [assignError, setAssignError] = useState<string | null>(null);
+  const [inspectedDriverId, setInspectedDriverId] = useState<string | null>(null);
   const [buyError, setBuyError] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -39,7 +41,23 @@ export default function GameApp() {
   const reloadBoard = board.reload;
   const reloadRef = useRef(reloadBoard);
   const overFetched = useRef(false);
-  const startRef = useRef<() => void>(() => {});
+
+  const start = () => {
+    try {
+      audioRef.current?.unlock();
+    } catch {
+      /* autoplay can throw; the shift still starts */
+    }
+    const sim = simRef.current ?? new GameSim();
+    simRef.current = sim;
+    sim.start();
+    setSnap(sim.snapshot());
+  };
+  const startRef = useRef(start);
+
+  useEffect(() => {
+    startRef.current = start;
+  });
 
   useEffect(() => {
     reloadRef.current = reloadBoard;
@@ -52,7 +70,7 @@ export default function GameApp() {
     audioRef.current = audio;
     const sim = simRef.current ?? new GameSim();
     simRef.current = sim;
-    sim.onDing = () => audio.playDing();
+    sim.setDingHandler(() => audio.playDing());
 
     let renderer: CityRenderer;
     try {
@@ -62,9 +80,11 @@ export default function GameApp() {
       return;
     }
     renderer.attachSim(sim);
+    renderer.setInspectHandler(setInspectedDriverId);
     renderer.setFocusHandler((hit) => {
       setAssignError(null);
       if (!hit) return;
+      if (hit.type === "driver") setInspectedDriverId(hit.id);
       const r = hit.type === "driver" ? sim.pickDriver(hit.id) : hit.type === "order" ? sim.pickOrder(hit.id) : null;
       if (r?.error) setAssignError(r.error);
       setSnap(sim.snapshot());
@@ -122,19 +142,6 @@ export default function GameApp() {
       delete window.__volt;
     };
   }, []);
-
-  const start = () => {
-    try {
-      audioRef.current?.unlock();
-    } catch {
-      /* autoplay can throw; the shift still starts */
-    }
-    const sim = simRef.current ?? new GameSim();
-    simRef.current = sim;
-    sim.start();
-    setSnap(sim.snapshot());
-  };
-  startRef.current = start;
 
   const onOrder = (id: string) => {
     setAssignError(null);
@@ -212,7 +219,17 @@ export default function GameApp() {
         />
       ) : null}
       {snap.started && !snap.over ? (
-        <DispatchColumn snap={snap} onOrder={onOrder} onDriver={onDriver} assignError={assignError} />
+        <>
+          <RiderInspector driver={snap.drivers.find((driver) => driver.id === inspectedDriverId) ?? null} />
+          <DispatchColumn
+            snap={snap}
+            onOrder={onOrder}
+            onDriver={onDriver}
+            inspectedDriverId={inspectedDriverId}
+            onInspectDriver={setInspectedDriverId}
+            assignError={assignError}
+          />
+        </>
       ) : null}
       <ShopSheet open={shopOpen} onOpenChange={setShopOpen} snap={snap} onBuy={onBuy} buyError={buyError} />
       <BoardSheet
