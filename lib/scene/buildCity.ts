@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import type { CityData } from "@/lib/game/types";
 import { ayalonX, coastX } from "@/lib/game/city";
 import { paperTexture, waterTexture } from "./textures";
@@ -6,6 +7,7 @@ import { paperTexture, waterTexture } from "./textures";
 export function buildCityMesh(city: CityData) {
   const root = new THREE.Group();
   const interactables: THREE.Object3D[] = [];
+  const boxBatches = new Map<THREE.Material, THREE.BufferGeometry[]>();
   const paper = paperTexture();
   const waterTex = waterTexture();
 
@@ -79,18 +81,23 @@ export function buildCityMesh(city: CityData) {
   );
   root.add(river);
 
+  const ayalonMaterial = new THREE.MeshBasicMaterial({ color: 0x7f8885 });
   for (let z = -86; z < 86; z += 10) {
     const x0 = ayalonX(z);
     const x1 = ayalonX(z + 10);
     const dx = x1 - x0;
     const len = Math.hypot(dx, 10);
-    const strip = new THREE.Mesh(
-      new THREE.BoxGeometry(3.4, 0.035, len + 0.2),
-      new THREE.MeshBasicMaterial({ color: 0x7f8885 })
+    batchBox(
+      boxBatches,
+      ayalonMaterial,
+      3.4,
+      0.035,
+      len + 0.2,
+      (x0 + x1) / 2,
+      0.035,
+      z + 5,
+      Math.atan2(dx, 10)
     );
-    strip.position.set((x0 + x1) / 2, 0.035, z + 5);
-    strip.rotation.y = Math.atan2(dx, 10);
-    root.add(strip);
   }
 
   const streetCasing = new THREE.MeshBasicMaterial({ color: 0xd3ad91 });
@@ -121,16 +128,21 @@ export function buildCityMesh(city: CityData) {
             : major
               ? 1.16
               : 0.64;
-    const casing = new THREE.Mesh(
-      new THREE.BoxGeometry(w + (e.kind === "highway" ? 0.7 : 0.28), 0.025, len + 0.4),
-      e.kind === "highway" ? highwayCasing : major || e.kind !== "street" ? majorCasing : streetCasing
+    const rotation = Math.atan2(dx, dz);
+    batchBox(
+      boxBatches,
+      e.kind === "highway" ? highwayCasing : major || e.kind !== "street" ? majorCasing : streetCasing,
+      w + (e.kind === "highway" ? 0.7 : 0.28),
+      0.025,
+      len + 0.4,
+      (a.x + b.x) / 2,
+      0.038,
+      (a.z + b.z) / 2,
+      rotation
     );
-    casing.position.set((a.x + b.x) / 2, 0.038, (a.z + b.z) / 2);
-    casing.rotation.y = Math.atan2(dx, dz);
-    root.add(casing);
 
-    const fill = new THREE.Mesh(
-      new THREE.BoxGeometry(w, 0.025, len + 0.25),
+    batchBox(
+      boxBatches,
       e.kind === "highway"
         ? highwayFill
         : e.kind === "boulevard"
@@ -139,25 +151,24 @@ export function buildCityMesh(city: CityData) {
             ? promenadeFill
             : major
               ? majorFill
-              : streetFill
+              : streetFill,
+      w,
+      0.025,
+      len + 0.25,
+      (a.x + b.x) / 2,
+      0.055,
+      (a.z + b.z) / 2,
+      rotation
     );
-    fill.position.set((a.x + b.x) / 2, 0.055, (a.z + b.z) / 2);
-    fill.rotation.y = casing.rotation.y;
-    root.add(fill);
 
     if (e.kind === "boulevard") {
-      const median = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.02, len - 0.1), boulevardMedian);
-      median.position.set((a.x + b.x) / 2, 0.074, (a.z + b.z) / 2);
-      median.rotation.y = casing.rotation.y;
-      root.add(median);
+      batchBox(boxBatches, boulevardMedian, 0.22, 0.02, len - 0.1, (a.x + b.x) / 2, 0.074, (a.z + b.z) / 2, rotation);
     }
     if (e.kind === "highway") {
-      const median = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.02, len - 0.1), highwayMedian);
-      median.position.set((a.x + b.x) / 2, 0.075, (a.z + b.z) / 2);
-      median.rotation.y = casing.rotation.y;
-      root.add(median);
+      batchBox(boxBatches, highwayMedian, 0.18, 0.02, len - 0.1, (a.x + b.x) / 2, 0.075, (a.z + b.z) / 2, rotation);
     }
   }
+  flushBoxBatches(root, boxBatches);
 
   const dummy = new THREE.Object3D();
   const box = new THREE.BoxGeometry(1, 1, 1);
@@ -191,6 +202,38 @@ export function buildCityMesh(city: CityData) {
       waterTex.offset.x += dt * 0.008;
     },
   };
+}
+
+function batchBox(
+  batches: Map<THREE.Material, THREE.BufferGeometry[]>,
+  material: THREE.Material,
+  width: number,
+  height: number,
+  depth: number,
+  x: number,
+  y: number,
+  z: number,
+  rotationY: number
+) {
+  const geometry = new THREE.BoxGeometry(width, height, depth);
+  geometry.rotateY(rotationY);
+  geometry.translate(x, y, z);
+  const batch = batches.get(material);
+  if (batch) batch.push(geometry);
+  else batches.set(material, [geometry]);
+}
+
+function flushBoxBatches(root: THREE.Group, batches: Map<THREE.Material, THREE.BufferGeometry[]>) {
+  for (const [material, geometries] of batches) {
+    const merged = mergeGeometries(geometries, false);
+    if (merged) {
+      geometries.forEach((geometry) => geometry.dispose());
+      root.add(new THREE.Mesh(merged, material));
+    } else {
+      geometries.forEach((geometry) => root.add(new THREE.Mesh(geometry, material)));
+    }
+  }
+  batches.clear();
 }
 
 function addDistrictTints(root: THREE.Group) {
