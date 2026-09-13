@@ -22,11 +22,15 @@ export class CityRenderer {
   private panning: { pointerId: number; x: number; y: number } | null = null;
   private pendingTap: { pointerId: number; x: number; y: number } | null = null;
   private pinch: { dist: number; zoom: number } | null = null;
-  private viewH = 92;
+  private viewH = 78;
   private onFocus: ((hit: Hit | null) => void) | null = null;
+  private onInspect: ((driverId: string | null) => void) | null = null;
+  private inspectedDriverId: string | null = null;
+  private longPressTimer: number | null = null;
   private dummy = new THREE.Object3D();
   private dotGeo = new THREE.CircleGeometry(0.42, 10);
   private vehicleGeo: THREE.BufferGeometry;
+  private mapRoot = new THREE.Group();
 
   constructor(private canvas: HTMLCanvasElement, sim: GameSim) {
     this.renderer = new THREE.WebGLRenderer({
@@ -48,7 +52,12 @@ export class CityRenderer {
     this.camera.lookAt(-6, 0, 0);
 
     const built = buildCityMesh(sim.city);
-    this.scene.add(built.root);
+    // Tel Aviv is long and narrow. Compress north/south presentation so the
+    // complete coast reads as one dense game board without changing simulation coordinates.
+    this.mapRoot.scale.set(1, 1, 0.74);
+    this.mapRoot.add(built.root);
+    this.scene.add(this.mapRoot);
+    this.mapRoot.updateMatrixWorld(true);
     this.interactables = built.interactables;
     this.cityTick = built.tick;
     this.vehicleGeo = makeChevron();
@@ -59,6 +68,7 @@ export class CityRenderer {
     canvas.addEventListener("pointermove", this.onMove);
     canvas.addEventListener("pointerup", this.onUp);
     canvas.addEventListener("pointercancel", this.onUp);
+    canvas.addEventListener("pointerleave", this.onLeave);
     canvas.addEventListener("wheel", this.onWheel, { passive: false });
     this.resize();
   }
@@ -67,18 +77,33 @@ export class CityRenderer {
     this.onFocus = fn;
   }
 
+  setInspectHandler(fn: (driverId: string | null) => void) {
+    this.onInspect = fn;
+  }
+
+  private inspectDriver(driverId: string | null) {
+    if (this.inspectedDriverId === driverId) return;
+    this.inspectedDriverId = driverId;
+    this.onInspect?.(driverId);
+  }
+
   private refreshCamera() {
     this.camera.updateProjectionMatrix();
   }
 
   /** Screen-space position for capture / hit tests. */
   screenPoint(x: number, z: number) {
-    const v = new THREE.Vector3(x, 0.4, z).project(this.camera);
+    const v = this.mapPoint(x, z).project(this.camera);
     const rect = this.canvas.getBoundingClientRect();
     return {
       x: (v.x * 0.5 + 0.5) * rect.width + rect.left,
       y: (-v.y * 0.5 + 0.5) * rect.height + rect.top,
     };
+  }
+
+  private mapPoint(x: number, z: number, y = 0.4) {
+    this.mapRoot.updateMatrixWorld(true);
+    return new THREE.Vector3(x, y, z).applyMatrix4(this.mapRoot.matrixWorld);
   }
 
   private frustum() {
@@ -96,7 +121,8 @@ export class CityRenderer {
     this.raycaster.setFromCamera(new THREE.Vector2(x, y), this.camera);
     const hit = new THREE.Vector3();
     if (!this.raycaster.ray.intersectPlane(this.ground, hit)) return null;
-    return { x: hit.x, z: hit.z };
+    const local = this.mapRoot.worldToLocal(hit);
+    return { x: local.x, z: local.z };
   }
 
   private screenDist(ax: number, ay: number, bx: number, by: number) {
@@ -108,7 +134,7 @@ export class CityRenderer {
     let best: string | null = null;
     let bestD = 42;
     for (const d of sim.drivers) {
-      const v = new THREE.Vector3(d.x, 0.4, d.z).project(this.camera);
+      const v = this.mapPoint(d.x, d.z).project(this.camera);
       const px = (v.x * 0.5 + 0.5) * rect.width;
       const py = (-v.y * 0.5 + 0.5) * rect.height;
       const dist = this.screenDist(px, py, sx - rect.left, sy - rect.top);
@@ -148,6 +174,17 @@ export class CityRenderer {
   private onDown = (e: PointerEvent) => {
     this.canvas.setPointerCapture(e.pointerId);
     this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (e.pointerType !== "mouse") {
+      if (this.longPressTimer !== null) window.clearTimeout(this.longPressTimer);
+      this.longPressTimer = window.setTimeout(() => {
+        const sim = this.simFromCanvas();
+        const driverId = sim ? this.hitDriver(sim, e.clientX, e.clientY) : null;
+        if (driverId) {
+          this.pendingTap = null;
+          this.inspectDriver(driverId);
+        }
+      }, 420);
+    }
     if (this.pointers.size === 2) {
       this.pendingTap = null;
       this.panning = null;
@@ -159,6 +196,10 @@ export class CityRenderer {
   };
 
   private onMove = (e: PointerEvent) => {
+    if (e.pointerType === "mouse" && !this.pointers.has(e.pointerId)) {
+      const sim = this.simFromCanvas();
+      this.inspectDriver(sim ? this.hitDriver(sim, e.clientX, e.clientY) : null);
+    }
     if (this.pointers.has(e.pointerId)) this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (this.pointers.size >= 2 && this.pinch) {
       const pts = [...this.pointers.values()];
@@ -171,6 +212,8 @@ export class CityRenderer {
     if (this.pendingTap && this.pendingTap.pointerId === e.pointerId) {
       const moved = Math.hypot(e.clientX - this.pendingTap.x, e.clientY - this.pendingTap.y);
       if (moved > 10) {
+        if (this.longPressTimer !== null) window.clearTimeout(this.longPressTimer);
+        this.longPressTimer = null;
         this.panning = { pointerId: e.pointerId, x: this.pendingTap.x, y: this.pendingTap.y };
         this.pendingTap = null;
       } else {
@@ -190,6 +233,8 @@ export class CityRenderer {
   };
 
   private onUp = (e: PointerEvent) => {
+    if (this.longPressTimer !== null) window.clearTimeout(this.longPressTimer);
+    this.longPressTimer = null;
     this.pointers.delete(e.pointerId);
     if (this.pointers.size < 2) this.pinch = null;
     if (this.pendingTap && this.pendingTap.pointerId === e.pointerId) {
@@ -209,6 +254,10 @@ export class CityRenderer {
     } catch {
       /* already released */
     }
+  };
+
+  private onLeave = (e: PointerEvent) => {
+    if (e.pointerType === "mouse") this.inspectDriver(null);
   };
 
   private onWheel = (e: WheelEvent) => {
@@ -240,7 +289,7 @@ export class CityRenderer {
     const w = this.canvas.clientWidth || this.canvas.parentElement?.clientWidth || 1;
     const h = this.canvas.clientHeight || this.canvas.parentElement?.clientHeight || 1;
     const aspect = w / Math.max(1, h);
-    this.viewH = Math.max(100, 80 / aspect);
+    this.viewH = Math.max(78, 68 / aspect);
     // Swap left/right so camera-right is world +X. Looking down with up=+Z
     // otherwise puts the Mediterranean (west, −X) on the right of the screen.
     this.camera.left = this.viewH * aspect;
@@ -282,7 +331,7 @@ export class CityRenderer {
         rim.scale.setScalar(1.18);
         g.add(shadow, rim, body);
         g.userData = { type: "driver", id: d.id };
-        this.scene.add(g);
+        this.mapRoot.add(g);
         this.driverMeshes.set(d.id, g);
       }
       g.position.set(d.x, 0, d.z);
@@ -304,13 +353,14 @@ export class CityRenderer {
         halo.visible = true;
         (halo.material as THREE.MeshBasicMaterial).color.setHex(sim.pairInfo(job.id).color);
       } else {
-        halo.visible = d.state === "returning";
-        (halo.material as THREE.MeshBasicMaterial).color.setHex(0x9aa3ab);
+        halo.visible = d.state === "returning" || sim.selectedDriverId === d.id;
+        (halo.material as THREE.MeshBasicMaterial).color.setHex(sim.selectedDriverId === d.id ? 0x2ee6c7 : 0x9aa3ab);
       }
+      (halo.material as THREE.MeshBasicMaterial).opacity = sim.selectedDriverId === d.id ? 1 : 0.72;
     }
     for (const [id, g] of this.driverMeshes) {
       if (!seen.has(id)) {
-        this.scene.remove(g);
+        this.mapRoot.remove(g);
         this.driverMeshes.delete(id);
       }
     }
@@ -323,7 +373,7 @@ export class CityRenderer {
       if (pts.length < 2) {
         const old = this.trailDots.get(d.id);
         if (old) {
-          this.scene.remove(old);
+          this.mapRoot.remove(old);
           this.trailDots.delete(d.id);
         }
         continue;
@@ -341,7 +391,7 @@ export class CityRenderer {
           360
         );
         mesh.frustumCulled = false;
-        this.scene.add(mesh);
+        this.mapRoot.add(mesh);
         this.trailDots.set(d.id, mesh);
       }
       (mesh.material as THREE.MeshBasicMaterial).color.setHex(color);
@@ -349,7 +399,7 @@ export class CityRenderer {
     }
     for (const [id, mesh] of this.trailDots) {
       if (!seen.has(id)) {
-        this.scene.remove(mesh);
+        this.mapRoot.remove(mesh);
         this.trailDots.delete(id);
       }
     }
@@ -363,11 +413,11 @@ export class CityRenderer {
       const info = sim.pairInfo(o.id);
       let g = this.orderMarkers.get(o.id);
       if (!g || g.userData.ticketNo !== info.ticketNo || g.userData.pairColor !== info.color) {
-        if (g) this.scene.remove(g);
+        if (g) this.mapRoot.remove(g);
         g = makePairedOrder(info.color, info.ticketNo);
         g.userData.type = "order";
         g.userData.id = o.id;
-        this.scene.add(g);
+        this.mapRoot.add(g);
         this.orderMarkers.set(o.id, g);
       }
       const rest = sim.city.restaurants.find((x) => x.id === o.restaurantId)!;
@@ -388,7 +438,7 @@ export class CityRenderer {
     }
     for (const [id, g] of this.orderMarkers) {
       if (!seen.has(id)) {
-        this.scene.remove(g);
+        this.mapRoot.remove(g);
         this.orderMarkers.delete(id);
       }
     }
@@ -400,7 +450,9 @@ export class CityRenderer {
     this.canvas.removeEventListener("pointermove", this.onMove);
     this.canvas.removeEventListener("pointerup", this.onUp);
     this.canvas.removeEventListener("pointercancel", this.onUp);
+    this.canvas.removeEventListener("pointerleave", this.onLeave);
     this.canvas.removeEventListener("wheel", this.onWheel);
+    if (this.longPressTimer !== null) window.clearTimeout(this.longPressTimer);
     this.renderer.dispose();
   }
 }
