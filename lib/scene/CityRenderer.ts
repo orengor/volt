@@ -27,17 +27,22 @@ export class CityRenderer {
   private dummy = new THREE.Object3D();
   private dotGeo = new THREE.CircleGeometry(0.42, 10);
   private vehicleGeo: THREE.BufferGeometry;
+  private trailSyncElapsed = Infinity;
+  private pointerEventsEnabled: boolean | null = null;
 
   constructor(private canvas: HTMLCanvasElement, sim: GameSim) {
+    const lowCoreDevice = (navigator.hardwareConcurrency || 8) <= 4;
+    const coarsePointer = window.matchMedia("(pointer: coarse)").matches;
+    const maxPixelRatio = lowCoreDevice ? 1 : coarsePointer ? 1.25 : 1.5;
     this.renderer = new THREE.WebGLRenderer({
       canvas,
-      antialias: true,
+      antialias: window.devicePixelRatio <= 1.5,
       alpha: false,
-      powerPreference: "high-performance",
+      powerPreference: "low-power",
       failIfMajorPerformanceCaveat: false,
-      preserveDrawingBuffer: true,
+      preserveDrawingBuffer: false,
     });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, maxPixelRatio));
     this.renderer.setClearColor(0x8ec8d6, 1);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.scene = new THREE.Scene();
@@ -253,11 +258,19 @@ export class CityRenderer {
 
   render(sim: GameSim, dt: number) {
     if (this.disposed) return;
-    this.canvas.style.pointerEvents = sim.started && !sim.over ? "auto" : "none";
+    const pointerEventsEnabled = sim.started && !sim.over;
+    if (pointerEventsEnabled !== this.pointerEventsEnabled) {
+      this.pointerEventsEnabled = pointerEventsEnabled;
+      this.canvas.style.pointerEvents = pointerEventsEnabled ? "auto" : "none";
+    }
     this.attachSim(sim);
     this.cityTick(dt);
     this.syncDrivers(sim);
-    this.syncTrails(sim);
+    this.trailSyncElapsed += dt;
+    if (this.trailSyncElapsed >= 1 / 15) {
+      this.trailSyncElapsed = 0;
+      this.syncTrails(sim);
+    }
     this.syncOrders(sim);
     this.renderer.render(this.scene, this.camera);
   }
@@ -324,6 +337,7 @@ export class CityRenderer {
         const old = this.trailDots.get(d.id);
         if (old) {
           this.scene.remove(old);
+          disposeMaterials(old.material);
           this.trailDots.delete(d.id);
         }
         continue;
@@ -350,6 +364,7 @@ export class CityRenderer {
     for (const [id, mesh] of this.trailDots) {
       if (!seen.has(id)) {
         this.scene.remove(mesh);
+        disposeMaterials(mesh.material);
         this.trailDots.delete(id);
       }
     }
@@ -363,32 +378,38 @@ export class CityRenderer {
       const info = sim.pairInfo(o.id);
       let g = this.orderMarkers.get(o.id);
       if (!g || g.userData.ticketNo !== info.ticketNo || g.userData.pairColor !== info.color) {
-        if (g) this.scene.remove(g);
+        if (g) {
+          this.scene.remove(g);
+          disposeObject(g);
+        }
         g = makePairedOrder(info.color, info.ticketNo);
         g.userData.type = "order";
         g.userData.id = o.id;
+        const rest = sim.city.restaurants.find((x) => x.id === o.restaurantId)!;
+        const cust = sim.city.customers.find((x) => x.id === o.customerId)!;
+        const pickup = g.userData.pickup as THREE.Group;
+        const drop = g.userData.drop as THREE.Group;
+        pickup.position.set(rest.x, 0.12, rest.z);
+        drop.position.set(cust.x, 0.12, cust.z);
+        const line = g.userData.line as THREE.Line;
+        const pos = line.geometry.getAttribute("position") as THREE.BufferAttribute;
+        pos.setXYZ(0, rest.x, 0.2, rest.z);
+        pos.setXYZ(1, cust.x, 0.2, cust.z);
+        pos.needsUpdate = true;
+        line.computeLineDistances();
         this.scene.add(g);
         this.orderMarkers.set(o.id, g);
       }
-      const rest = sim.city.restaurants.find((x) => x.id === o.restaurantId)!;
-      const cust = sim.city.customers.find((x) => x.id === o.customerId)!;
       const pickup = g.userData.pickup as THREE.Group;
       const drop = g.userData.drop as THREE.Group;
-      pickup.position.set(rest.x, 0.12, rest.z);
-      drop.position.set(cust.x, 0.12, cust.z);
       const pulse = o.id === sim.incomingId ? 1.12 + Math.sin(performance.now() / 180) * 0.08 : o.id === sim.selectedOrderId ? 1.1 : 1;
       pickup.scale.setScalar(pulse);
       drop.scale.setScalar(o.status === "picked" ? 1.12 : 0.95);
-      const line = g.userData.line as THREE.Line;
-      const pos = line.geometry.getAttribute("position") as THREE.BufferAttribute;
-      pos.setXYZ(0, rest.x, 0.2, rest.z);
-      pos.setXYZ(1, cust.x, 0.2, cust.z);
-      pos.needsUpdate = true;
-      line.computeLineDistances();
     }
     for (const [id, g] of this.orderMarkers) {
       if (!seen.has(id)) {
         this.scene.remove(g);
+        disposeObject(g);
         this.orderMarkers.delete(id);
       }
     }
@@ -401,8 +422,42 @@ export class CityRenderer {
     this.canvas.removeEventListener("pointerup", this.onUp);
     this.canvas.removeEventListener("pointercancel", this.onUp);
     this.canvas.removeEventListener("wheel", this.onWheel);
+    delete (this.canvas as HTMLCanvasElement & { __sim?: GameSim }).__sim;
+    disposeObject(this.scene);
     this.renderer.dispose();
   }
+}
+
+function disposeMaterials(materialOrMaterials: THREE.Material | THREE.Material[]) {
+  const materials = Array.isArray(materialOrMaterials) ? materialOrMaterials : [materialOrMaterials];
+  const textures = new Set<THREE.Texture>();
+  for (const material of materials) {
+    for (const value of Object.values(material)) {
+      if (value instanceof THREE.Texture) textures.add(value);
+    }
+    material.dispose();
+  }
+  textures.forEach((texture) => texture.dispose());
+}
+
+function disposeObject(root: THREE.Object3D) {
+  const geometries = new Set<THREE.BufferGeometry>();
+  const materials = new Set<THREE.Material>();
+  const textures = new Set<THREE.Texture>();
+  root.traverse((object) => {
+    const renderable = object as THREE.Mesh & { material?: THREE.Material | THREE.Material[] };
+    if (renderable.geometry) geometries.add(renderable.geometry);
+    const objectMaterials = Array.isArray(renderable.material) ? renderable.material : renderable.material ? [renderable.material] : [];
+    for (const material of objectMaterials) {
+      materials.add(material);
+      for (const value of Object.values(material)) {
+        if (value instanceof THREE.Texture) textures.add(value);
+      }
+    }
+  });
+  geometries.forEach((geometry) => geometry.dispose());
+  materials.forEach((material) => material.dispose());
+  textures.forEach((texture) => texture.dispose());
 }
 
 function makeChevron() {
@@ -435,7 +490,8 @@ function makePairedOrder(color: number, n: number) {
     new THREE.MeshBasicMaterial({ color: 0xfffaf2, side: THREE.DoubleSide })
   );
   ring.rotation.x = -Math.PI / 2;
-  const kitchenNo = numberSprite(n);
+  const numberTexture = makeNumberTexture(n);
+  const kitchenNo = numberSprite(numberTexture);
   kitchenNo.position.y = 1.05;
   pickup.add(fill, ring, kitchenNo);
 
@@ -446,7 +502,7 @@ function makePairedOrder(color: number, n: number) {
   );
   sq.rotation.x = -Math.PI / 2;
   sq.rotation.z = Math.PI / 4;
-  const dropNo = numberSprite(n);
+  const dropNo = numberSprite(numberTexture);
   dropNo.position.y = 1.05;
   drop.add(sq, dropNo);
 
@@ -464,7 +520,7 @@ function makePairedOrder(color: number, n: number) {
   return g;
 }
 
-function numberSprite(n: number) {
+function makeNumberTexture(n: number) {
   const c = document.createElement("canvas");
   c.width = 128;
   c.height = 128;
@@ -480,7 +536,11 @@ function numberSprite(n: number) {
   ctx.fillText(String(n), 64, 70);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
-  const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
+  return tex;
+}
+
+function numberSprite(texture: THREE.Texture) {
+  const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false }));
   spr.scale.set(-3.2, 3.2, 1);
   spr.renderOrder = 12;
   return spr;
