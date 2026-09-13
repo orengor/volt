@@ -72,27 +72,46 @@ export default function GameApp() {
 
     let raf = 0;
     let last = performance.now();
+    let lastFrame = last - 1000;
     let uiAcc = 0;
     const loop = (t: number) => {
-      const dt = Math.min(0.05, (t - last) / 1000);
-      last = t;
-      sim.update(dt);
-      renderer.render(sim, dt);
-      uiAcc += dt;
-      if (uiAcc > 0.12) {
-        uiAcc = 0;
-        const snapNext = sim.snapshot();
-        setSnap(snapNext);
-        if (snapNext.over && !overFetched.current) {
-          overFetched.current = true;
-          void reloadRef.current();
+      raf = 0;
+      if (!document.hidden) {
+        const frameInterval = 1000 / (sim.started && !sim.over ? 30 : 4);
+        if (t - lastFrame >= frameInterval) {
+          const dt = Math.min(0.05, (t - last) / 1000);
+          last = t;
+          lastFrame = t - ((t - lastFrame) % frameInterval);
+          sim.update(dt);
+          renderer.render(sim, dt);
+          uiAcc += dt;
+          if (uiAcc > 0.12) {
+            uiAcc = 0;
+            const snapNext = sim.snapshot();
+            setSnap(snapNext);
+            if (snapNext.over && !overFetched.current) {
+              overFetched.current = true;
+              void reloadRef.current();
+            }
+          }
         }
+        raf = requestAnimationFrame(loop);
       }
-      raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        cancelAnimationFrame(raf);
+        raf = 0;
+        return;
+      }
+      last = performance.now();
+      lastFrame = last - 1000;
+      if (!raf) raf = requestAnimationFrame(loop);
+    };
     const onResize = () => renderer.resize();
     window.addEventListener("resize", onResize);
+    document.addEventListener("visibilitychange", onVisibilityChange);
     const ro = new ResizeObserver(onResize);
     ro.observe(canvas);
     renderer.resize();
@@ -117,6 +136,7 @@ export default function GameApp() {
       cancelAnimationFrame(raf);
       window.removeEventListener("resize", onResize);
       window.removeEventListener("pointerup", kickoff, true);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
       ro.disconnect();
       renderer.dispose();
       delete window.__volt;
@@ -134,7 +154,9 @@ export default function GameApp() {
     sim.start();
     setSnap(sim.snapshot());
   };
-  startRef.current = start;
+  useEffect(() => {
+    startRef.current = start;
+  });
 
   const onOrder = (id: string) => {
     setAssignError(null);
