@@ -155,6 +155,7 @@ export type OrderView = {
   cookPct: number;
   cookReady: boolean;
   dueGameMin: number;
+  latePct: number;
   dueLabel: string;
   slipping: boolean;
   driverId: string | null;
@@ -176,12 +177,24 @@ export type DriverView = {
   color: string;
   state: DriverState;
   statusLine: string;
+  locationLabel: string;
+  destinationLabel: string;
   load: number;
   capacity: number;
   selected: boolean;
   idle: boolean;
   jobColor: string | null;
   jobVerb: string;
+  jobs: {
+    id: string;
+    ticketNo: number;
+    pairColor: string;
+    restaurantName: string;
+    restaurantAddress: string;
+    customerAddress: string;
+    statusLabel: string;
+    targetLabel: string;
+  }[];
   x: number;
   z: number;
 };
