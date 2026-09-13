@@ -68,6 +68,10 @@ export class GameSim {
     for (let i = 0; i < STARTING_DRIVERS; i++) this.addDriver(i);
   }
 
+  setDingHandler(handler: (() => void) | null) {
+    this.onDing = handler;
+  }
+
   private addDriver(index: number) {
     const pose = curbAt(this.city, this.city.hubNodeId, index);
     const d: Driver = {
@@ -542,6 +546,7 @@ export class GameSim {
           cookPct: 1 - o.cookRemaining / o.cookTotal,
           cookReady: o.cookRemaining <= 0,
           dueGameMin: due,
+          latePct: Math.max(0, Math.min(1, due / LATE_GAME_MINUTES)),
           dueLabel: formatDue(due),
           slipping: due <= 22 && o.status !== "late",
           driverId: o.driverId,
@@ -563,19 +568,60 @@ export class GameSim {
     ];
 
     const drivers: DriverView[] = this.drivers.map((d) => {
-      const jobOrder = orders.find((o) => o.driverId === d.id && o.phase !== "late");
+      const driverJobs = d.assigned
+        .map((id) => orders.find((o) => o.id === id))
+        .filter((o): o is OrderView => !!o && o.phase !== "late");
+      const jobOrder = driverJobs[0];
+      const carrying = driverJobs.find((o) => d.carrying.includes(o.id) || o.phase === "out");
+      const pickup = driverJobs.find((o) => !d.carrying.includes(o.id) && o.phase !== "out");
+      const nearbyRestaurant = this.city.restaurants.find((r) => dist(r.x, r.z, d.x, d.z) < 2.4);
+      const street = nearestNode(this.city, d.x, d.z).label?.replace(/ & /g, " × ");
+      const locationLabel = nearbyRestaurant
+        ? `${nearbyRestaurant.name} · ${nearbyRestaurant.address}`
+        : street
+          ? `On ${street}`
+          : "On the Tel Aviv street grid";
+      const destinationLabel =
+        d.state === "delivering" && carrying
+          ? carrying.customerAddress
+          : (d.state === "to_pickup" || d.state === "waiting") && pickup
+            ? `${pickup.restaurantName} · ${pickup.restaurantAddress}`
+            : d.state === "returning"
+              ? "Dizengoff rider hub"
+              : driverJobs.length
+                ? driverJobs[0].phase === "out"
+                  ? driverJobs[0].customerAddress
+                  : `${driverJobs[0].restaurantName} · ${driverJobs[0].restaurantAddress}`
+                : "Waiting for an order";
       return {
         id: d.id,
         name: d.name,
         color: hexColor(d.color),
         state: d.state,
         statusLine: d.statusLine,
+        locationLabel,
+        destinationLabel,
         load: d.assigned.length,
         capacity: this.capacity,
         selected: this.selectedDriverId === d.id,
         idle: d.state === "idle",
         jobColor: jobOrder?.pairColor ?? null,
         jobVerb: jobVerb(d.state),
+        jobs: driverJobs.map((o) => ({
+          id: o.id,
+          ticketNo: o.ticketNo,
+          pairColor: o.pairColor,
+          restaurantName: o.restaurantName,
+          restaurantAddress: o.restaurantAddress,
+          customerAddress: o.customerAddress,
+          statusLabel: o.statusLabel,
+          targetLabel:
+            d.carrying.includes(o.id) || o.phase === "out"
+              ? `Drop · ${o.customerAddress}`
+              : o.cookReady
+                ? `Pickup · ${o.restaurantAddress}`
+                : `Cooking · ${o.restaurantName}`,
+        })),
         x: d.x,
         z: d.z,
       };
