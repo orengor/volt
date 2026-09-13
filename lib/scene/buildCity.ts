@@ -17,7 +17,7 @@ export function buildCityMesh(city: CityData) {
 
   const water = new THREE.Mesh(
     new THREE.PlaneGeometry(240, 260),
-    new THREE.MeshBasicMaterial({ map: waterTex, color: 0xa9dce5 })
+    new THREE.MeshBasicMaterial({ map: waterTex, color: 0x79c9d2 })
   );
   water.rotation.x = -Math.PI / 2;
   water.position.set(-18, -0.4, 0);
@@ -32,7 +32,7 @@ export function buildCityMesh(city: CityData) {
   landShape.closePath();
   const landGeo = new THREE.ShapeGeometry(landShape, 8);
   landGeo.rotateX(Math.PI / 2);
-  const land = new THREE.Mesh(landGeo, new THREE.MeshBasicMaterial({ map: paper, color: 0xf8eedc }));
+  const land = new THREE.Mesh(landGeo, new THREE.MeshBasicMaterial({ map: paper, color: 0xfff0d1 }));
   land.position.y = 0;
   root.add(land);
 
@@ -45,15 +45,27 @@ export function buildCityMesh(city: CityData) {
   sandShape.closePath();
   const sandGeo = new THREE.ShapeGeometry(sandShape, 6);
   sandGeo.rotateX(Math.PI / 2);
-  const sand = new THREE.Mesh(sandGeo, new THREE.MeshBasicMaterial({ color: 0xf1d89d }));
+  const sand = new THREE.Mesh(sandGeo, new THREE.MeshBasicMaterial({ color: 0xf5cb77 }));
   sand.position.y = 0.015;
   root.add(sand);
+
+  const shore = new THREE.Mesh(
+    new THREE.TubeGeometry(
+      new THREE.CatmullRomCurve3(coast.map((p) => new THREE.Vector3(p.x + 7.25, 0.055, p.z))),
+      80,
+      0.2,
+      5,
+      false
+    ),
+    new THREE.MeshBasicMaterial({ color: 0xdf7658 })
+  );
+  root.add(shore);
 
   addDistrictTints(root);
 
   const park = new THREE.Mesh(
     new THREE.CircleGeometry(22, 20),
-    new THREE.MeshBasicMaterial({ color: 0xbddca7 })
+    new THREE.MeshBasicMaterial({ color: 0xa8d38e })
   );
   park.rotation.x = -Math.PI / 2;
   park.position.set(4, 0.03, 62);
@@ -63,7 +75,7 @@ export function buildCityMesh(city: CityData) {
   const riverPts = city.yarkon.map((p) => new THREE.Vector3(p.x, 0.06, p.z));
   const river = new THREE.Mesh(
     new THREE.TubeGeometry(new THREE.CatmullRomCurve3(riverPts), 40, 1.35, 5, false),
-    new THREE.MeshBasicMaterial({ color: 0x8ec4d2 })
+    new THREE.MeshBasicMaterial({ color: 0x59b6c5 })
   );
   root.add(river);
 
@@ -74,23 +86,23 @@ export function buildCityMesh(city: CityData) {
     const len = Math.hypot(dx, 10);
     const strip = new THREE.Mesh(
       new THREE.BoxGeometry(3.4, 0.035, len + 0.2),
-      new THREE.MeshBasicMaterial({ color: 0xcbbba4 })
+      new THREE.MeshBasicMaterial({ color: 0x7f8885 })
     );
     strip.position.set((x0 + x1) / 2, 0.035, z + 5);
     strip.rotation.y = Math.atan2(dx, 10);
     root.add(strip);
   }
 
-  const streetCasing = new THREE.MeshBasicMaterial({ color: 0xc9bca8 });
-  const streetFill = new THREE.MeshBasicMaterial({ color: 0xfff9ec });
-  const majorCasing = new THREE.MeshBasicMaterial({ color: 0xb6a58d });
-  const majorFill = new THREE.MeshBasicMaterial({ color: 0xfff6df });
-  const boulevardFill = new THREE.MeshBasicMaterial({ color: 0xfbecc9 });
-  const promenadeFill = new THREE.MeshBasicMaterial({ color: 0xfff4db });
-  const highwayCasing = new THREE.MeshBasicMaterial({ color: 0x947f68 });
-  const highwayFill = new THREE.MeshBasicMaterial({ color: 0xd9c8ac });
-  const boulevardMedian = new THREE.MeshBasicMaterial({ color: 0x91b879 });
-  const highwayMedian = new THREE.MeshBasicMaterial({ color: 0xfff3d0 });
+  const streetCasing = new THREE.MeshBasicMaterial({ color: 0xd3ad91 });
+  const streetFill = new THREE.MeshBasicMaterial({ color: 0xfff8e8 });
+  const majorCasing = new THREE.MeshBasicMaterial({ color: 0xc67c62 });
+  const majorFill = new THREE.MeshBasicMaterial({ color: 0xfff4dc });
+  const boulevardFill = new THREE.MeshBasicMaterial({ color: 0xffe5b2 });
+  const promenadeFill = new THREE.MeshBasicMaterial({ color: 0xfff1cf });
+  const highwayCasing = new THREE.MeshBasicMaterial({ color: 0x536d70 });
+  const highwayFill = new THREE.MeshBasicMaterial({ color: 0xa9bcaf });
+  const boulevardMedian = new THREE.MeshBasicMaterial({ color: 0x62a56d });
+  const highwayMedian = new THREE.MeshBasicMaterial({ color: 0xffdf8b });
   for (const e of city.edges) {
     const a = city.nodeById[e.a];
     const b = city.nodeById[e.b];
@@ -149,15 +161,21 @@ export function buildCityMesh(city: CityData) {
 
   const dummy = new THREE.Object3D();
   const box = new THREE.BoxGeometry(1, 1, 1);
-  const subset = city.buildings.filter((_, i) => i % 3 === 0).slice(0, 140);
-  const mats = new THREE.InstancedMesh(box, new THREE.MeshBasicMaterial({ color: 0xe6d3c2 }), subset.length);
+  const subset = city.buildings.filter((_, i) => i % 2 === 0).slice(0, 240);
+  const mats = new THREE.InstancedMesh(
+    box,
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.58 }),
+    subset.length
+  );
   subset.forEach((b, i) => {
-    dummy.position.set(b.x, 0.16, b.z);
+    dummy.position.set(b.x, 0.19, b.z);
     dummy.rotation.set(0, b.rot, 0);
-    dummy.scale.set(b.w * 0.95, 0.3, b.d * 0.95);
+    dummy.scale.set(b.w * 0.9, 0.38, b.d * 0.9);
     dummy.updateMatrix();
     mats.setMatrixAt(i, dummy.matrix);
+    mats.setColorAt(i, new THREE.Color(b.color).lerp(new THREE.Color(0xffd7b3), 0.28));
   });
+  if (mats.instanceColor) mats.instanceColor.needsUpdate = true;
   root.add(mats);
 
   addLandmarks(root, city);
@@ -177,10 +195,10 @@ export function buildCityMesh(city: CityData) {
 
 function addDistrictTints(root: THREE.Group) {
   const districts = [
-    { color: 0xf0bfa5, opacity: 0.11, points: [[-38, -86], [-15, -82], [-11, -57], [-28, -48], [-44, -60]] },
-    { color: 0xf0a98e, opacity: 0.1, points: [[-27, -49], [10, -50], [12, -31], [-16, -30]] },
-    { color: 0xe8c67f, opacity: 0.09, points: [[-22, -31], [20, -26], [18, 1], [-8, 8], [-28, -10]] },
-    { color: 0x8fc7c0, opacity: 0.08, points: [[-39, -12], [18, -10], [23, 37], [-39, 42]] },
+    { color: 0xd98767, opacity: 0.14, points: [[-38, -86], [-15, -82], [-11, -57], [-28, -48], [-44, -60]] },
+    { color: 0xe87958, opacity: 0.12, points: [[-27, -49], [10, -50], [12, -31], [-16, -30]] },
+    { color: 0xf0ba4f, opacity: 0.11, points: [[-22, -31], [20, -26], [18, 1], [-8, 8], [-28, -10]] },
+    { color: 0x5bb7b2, opacity: 0.1, points: [[-39, -12], [18, -10], [23, 37], [-39, 42]] },
   ];
   for (const district of districts) {
     const shape = new THREE.Shape();
@@ -270,9 +288,9 @@ function addLandmarks(root: THREE.Group, city: CityData) {
     }
   }
 
-  addLandmarkLabel(root, "AZRIELI", 41.6, 14, 10.5);
-  addLandmarkLabel(root, "JAFFA CLOCK", -23.5, -78, 13);
-  addLandmarkLabel(root, "DIZENGOFF SQ.", -21.8, 13.6, 14);
+  addLandmarkLabel(root, "Azrieli", 41.6, 14, 10.5);
+  addLandmarkLabel(root, "Jaffa Clock", -23.5, -78, 13);
+  addLandmarkLabel(root, "Dizengoff Sq.", -21.8, 13.6, 14);
 }
 
 function addTrees(root: THREE.Group, city: CityData) {
@@ -301,22 +319,22 @@ function makeLabel(
   c.height = 128;
   const ctx = c.getContext("2d")!;
   ctx.clearRect(0, 0, c.width, c.height);
+  const styles = getComputedStyle(document.documentElement);
+  const sans = styles.getPropertyValue("--font-sans").trim() || "ui-sans-serif, system-ui, sans-serif";
+  const heading = styles.getPropertyValue("--font-fredoka").trim() || sans;
+  ctx.shadowColor = "rgba(255, 244, 218, 0.9)";
+  ctx.shadowBlur = 5;
+  ctx.shadowOffsetY = 1;
   if (kind === "street") {
-    ctx.fillStyle = "rgba(255,250,238,0.9)";
-    ctx.strokeStyle = "rgba(128,104,78,0.5)";
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.roundRect(12, 10, c.width - 24, c.height - 20, 38);
-    ctx.fill();
-    ctx.stroke();
-    ctx.font = "800 82px ui-sans-serif, system-ui, sans-serif";
-    ctx.fillStyle = "#45392d";
+    ctx.font = `600 68px ${sans}`;
+    ctx.fillStyle = "#614d40";
   } else if (kind === "water") {
-    ctx.font = "italic 600 70px ui-serif, Georgia, serif";
-    ctx.fillStyle = "rgba(39,105,123,0.78)";
+    ctx.font = "italic 500 64px ui-serif, Georgia, serif";
+    ctx.shadowColor = "rgba(183, 233, 235, 0.75)";
+    ctx.fillStyle = "rgba(26,93,107,0.84)";
   } else {
-    ctx.font = "800 76px ui-sans-serif, system-ui, sans-serif";
-    ctx.fillStyle = "rgba(91,72,52,0.72)";
+    ctx.font = `600 68px ${heading}`;
+    ctx.fillStyle = "rgba(92,61,43,0.76)";
   }
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
@@ -324,6 +342,11 @@ function makeLabel(
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.minFilter = THREE.LinearFilter;
+  // Laying the canvas flat inverts its vertical axis; counter-flip only Y.
+  // The camera's west-left projection already preserves horizontal reading order.
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.y = -1;
+  tex.offset.y = 1;
   const material = new THREE.MeshBasicMaterial({
     map: tex,
     transparent: true,
@@ -334,7 +357,7 @@ function makeLabel(
   const geometry = new THREE.PlaneGeometry(1, 1);
   geometry.rotateX(-Math.PI / 2);
   const label = new THREE.Mesh(geometry, material);
-  label.scale.set(options.width ?? 20, 1, kind === "street" ? 3.6 : 4.6);
+  label.scale.set(options.width ?? 20, 1, kind === "street" ? 3.1 : 4.2);
   label.rotation.y = -(options.rotation ?? 0);
   label.renderOrder = 12;
   return label;
@@ -342,13 +365,12 @@ function makeLabel(
 
 function addLabels(root: THREE.Group) {
   const placeLabels = [
-    { text: "MEDITERRANEAN SEA", x: -69, z: 2, width: 31, kind: "water" as const },
-    { text: "OLD JAFFA", x: -18, z: -66, width: 18 },
-    { text: "FLORENTIN", x: 2, z: -39, width: 17 },
-    { text: "NEVE TZEDEK", x: -25, z: -43, width: 20 },
-    { text: "LEVINSKY", x: 12, z: -30, width: 16 },
-    { text: "TEL AVIV PORT", x: -35, z: 45, width: 23 },
-    { text: "PARK HAYARKON", x: 4, z: 67, width: 23 },
+    { text: "Mediterranean Sea", x: -69, z: 2, width: 31, kind: "water" as const },
+    { text: "Old Jaffa", x: -18, z: -66, width: 18 },
+    { text: "Florentin", x: 2, z: -39, width: 17 },
+    { text: "Neve Tzedek", x: -25, z: -43, width: 20 },
+    { text: "Tel Aviv Port", x: -35, z: 45, width: 23 },
+    { text: "Park HaYarkon", x: 4, z: 67, width: 23 },
   ];
   for (const label of placeLabels) {
     const s = makeLabel(label.text, { kind: label.kind, width: label.width });
@@ -357,23 +379,21 @@ function addLabels(root: THREE.Group) {
   }
 
   const streetLabels = [
-    { text: "TAYELET", x: -46, z: -25, width: 13, rotation: Math.PI / 2 },
-    { text: "HAYARKON ST", x: -38, z: 10, width: 18, rotation: Math.PI / 2 - 0.08 },
-    { text: "BEN YEHUDA ST", x: -31.5, z: 22, width: 20, rotation: Math.PI / 2 - 0.08 },
-    { text: "DIZENGOFF ST", x: -24.2, z: 22.5, width: 19, rotation: Math.PI / 2 - 0.13 },
-    { text: "IBN GABIROL ST", x: -2, z: 31, width: 21, rotation: Math.PI / 2 + 0.06 },
-    { text: "NAMIR RD", x: 24, z: 39, width: 14, rotation: Math.PI / 2 + 0.03 },
-    { text: "AYALON HWY 20", x: 36.8, z: -24, width: 20, rotation: Math.PI / 2 - 0.03 },
-    { text: "ROTHSCHILD BLVD", x: -7.5, z: -17.5, width: 23, rotation: 0.96 },
-    { text: "ALLENBY ST", x: -12.5, z: -29, width: 17, rotation: 0.92 },
-    { text: "KING GEORGE ST", x: -17.9, z: -10, width: 21, rotation: Math.PI / 2 - 0.12 },
-    { text: "ARLOZOROV ST", x: -1, z: 19.8, width: 20, rotation: 0 },
-    { text: "KAPLAN ST", x: 11.5, z: 7.7, width: 15, rotation: 0 },
-    { text: "HASHALOM RD", x: 31, z: 7.2, width: 18, rotation: 0 },
-    { text: "NORDAU BLVD", x: -15, z: 36.5, width: 18, rotation: 0 },
-    { text: "ROKACH BLVD", x: 21, z: 79.8, width: 18, rotation: 0 },
-    { text: "SALAME RD", x: 12, z: -47.4, width: 15, rotation: 0 },
-    { text: "YEFET ST", x: -26, z: -65, width: 13, rotation: Math.PI / 2 - 0.38 },
+    { text: "Tayelet", x: -46, z: -25, width: 13, rotation: Math.PI / 2 },
+    { text: "HaYarkon", x: -38, z: 10, width: 18, rotation: Math.PI / 2 - 0.08 },
+    { text: "Ben Yehuda", x: -31.5, z: 22, width: 20, rotation: Math.PI / 2 - 0.08 },
+    { text: "Dizengoff", x: -24.2, z: 22.5, width: 19, rotation: Math.PI / 2 - 0.13 },
+    { text: "Ibn Gabirol", x: -2, z: 31, width: 21, rotation: Math.PI / 2 + 0.06 },
+    { text: "Namir Rd", x: 24, z: 39, width: 14, rotation: Math.PI / 2 + 0.03 },
+    { text: "Ayalon Hwy 20", x: 36.8, z: -24, width: 20, rotation: Math.PI / 2 - 0.03 },
+    { text: "Rothschild Blvd", x: -7.5, z: -17.5, width: 23, rotation: 0.96 },
+    { text: "Allenby", x: -12.5, z: -29, width: 17, rotation: 0.92 },
+    { text: "King George", x: -17.9, z: -10, width: 21, rotation: Math.PI / 2 - 0.12 },
+    { text: "Arlozorov", x: -1, z: 19.8, width: 20, rotation: 0 },
+    { text: "Kaplan", x: 11.5, z: 7.7, width: 15, rotation: 0 },
+    { text: "Nordau Blvd", x: -15, z: 36.5, width: 18, rotation: 0 },
+    { text: "Rokach Blvd", x: 21, z: 79.8, width: 18, rotation: 0 },
+    { text: "Yefet", x: -26, z: -65, width: 13, rotation: Math.PI / 2 - 0.38 },
   ];
   for (const label of streetLabels) {
     const s = makeLabel(label.text, {
